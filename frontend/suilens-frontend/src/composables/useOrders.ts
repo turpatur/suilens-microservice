@@ -6,6 +6,7 @@ interface CreateOrderPayload {
   customerName: string;
   customerEmail: string;
   lensId: string;
+  branchCode: string;
   startDate: string;
   endDate: string;
 }

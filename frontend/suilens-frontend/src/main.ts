@@ -1,25 +1,29 @@
-/**
- * main.ts
- *
- * Bootstraps Vuetify and other plugins then mounts the App`
- */
+// Style imports — order matters:
+// 1. Declare CSS layer order before anything else
+import '@/styles/layers.css';
 
-// Composables
-import { createApp } from 'vue'
+// 2. Vuetify base styles (uses settings.scss internally via vuetify plugin)
+import 'vuetify/styles';
 
-// Plugins
-import { registerPlugins } from '@/plugins'
+// 3. Tailwind (theme + utilities, scoped to `tailwind` layer)
+import '@/styles/tailwind.css';
 
-// Components
-import App from './App.vue'
+// 4. Project overrides (vuetify-overrides layer, e.g. mono font fix)
+import '@/styles/main.scss';
 
-// Styles
-import 'unfonts.css'
-import './styles/tailwind.css'
-import './styles/main.scss'
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import { VueQueryPlugin } from '@tanstack/vue-query';
 
-const app = createApp(App)
+import App from './App.vue';
+import router from './router';
+import vuetify from './plugins/vuetify';
 
-registerPlugins(app)
+const app = createApp(App);
 
-app.mount('#app')
+app.use(createPinia());
+app.use(router);
+app.use(VueQueryPlugin);
+app.use(vuetify);
+
+app.mount('#app');

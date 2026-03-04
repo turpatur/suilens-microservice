@@ -8,6 +8,7 @@ interface CartItem {
   dayPrice: number;
   startDate: string;
   endDate: string;
+  branchCode: string;
 }
 
 export const useCartStore = defineStore('cart', () => {

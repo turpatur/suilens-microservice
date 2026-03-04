@@ -1,6 +1,6 @@
 import amqplib from 'amqplib';
 import { db } from './db';
-import { inventory } from './db/schema';
+import { inventory, reservations } from './db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 
 const RABBITMQ_URL =
@@ -31,9 +31,21 @@ export async function startConsumer() {
     const content = JSON.parse(msg.content.toString());
 
     if (content.event === 'order.cancelled') {
-      const { lensId, branchCode, quantity } = content.data;
+      const { orderId, lensId, branchCode, quantity } = content.data;
 
-      console.log('Releasing stock for cancelled order');
+      // Check if stock was already released for this orderId (idempotency)
+      const existingReservation = await db
+        .select()
+        .from(reservations)
+        .where(eq(reservations.orderId, orderId));
+
+      if (existingReservation[0] && existingReservation[0].status === 'released') {
+        console.log(`Stock already released for order ${orderId}, skipping...`);
+        channel.ack(msg);
+        return;
+      }
+
+      console.log('Releasing stock for cancelled order:', orderId);
 
       await db
         .update(inventory)
@@ -46,6 +58,14 @@ export async function startConsumer() {
             eq(inventory.branchCode, branchCode)
           )
         );
+
+      // Mark as released in reservations table
+      if (existingReservation[0]) {
+        await db
+          .update(reservations)
+          .set({ status: 'released' })
+          .where(eq(reservations.orderId, orderId));
+      }
     }
 
     channel.ack(msg);

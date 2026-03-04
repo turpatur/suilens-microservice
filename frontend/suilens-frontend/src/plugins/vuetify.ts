@@ -1,28 +1,29 @@
-/**
- * plugins/vuetify.ts
- *
- * Framework documentation: https://vuetifyjs.com
- */
+import { createVuetify } from 'vuetify';
+import * as components from 'vuetify/components';
+import * as directives from 'vuetify/directives';
 
-import { createVuetify } from 'vuetify'
-import '@mdi/font/css/materialdesignicons.css'
-import '../styles/layers.css'
-import 'vuetify/styles'
+// settings.scss is loaded via vite.config.ts as a global SASS preprocessor
+// option so Vuetify's own SASS can @use it. See vite.config.ts:
+//   css.preprocessorOptions.scss.additionalData = "@use '@/styles/settings.scss';"
 
 export default createVuetify({
+  components,
+  directives,
   theme: {
-    defaultTheme: 'system',
-    utilities: false,
-  },
-  display: {
-    mobileBreakpoint: 'md',
-    thresholds: {
-      xs: 0,
-      sm: 600,
-      md: 840,
-      lg: 1145,
-      xl: 1545,
-      xxl: 2138,
+    defaultTheme: 'light',
+    themes: {
+      light: {
+        colors: {
+          primary: '#1565C0',
+          secondary: '#009fbd',
+        },
+      },
+      dark: {
+        colors: {
+          primary: '#a7e0ff',
+          secondary: '#10e3fb',
+        },
+      },
     },
   },
-})
+});

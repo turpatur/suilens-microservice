@@ -7,12 +7,49 @@
       <v-list-item
         v-for="lens in lenses"
         :key="lens.id"
-        class="justify-space-between"
+        class="mb-4"
       >
-        <div>
-          <strong>{{ lens.modelName }}</strong> — Rp{{ lens.dayPrice }} / day
+        <div class="w-full">
+          <div class="flex justify-between items-start mb-3">
+            <div>
+              <strong>{{ lens.modelName }}</strong> — Rp{{ lens.dayPrice }} / day
+            </div>
+          </div>
+          <!-- Branch Inventory Display -->
+          <div v-if="inventoryData[lens.id]" class="mb-3 pl-4 border-l-2 border-blue-300">
+            <div class="text-sm font-semibold mb-2">Available branches:</div>
+            <div v-if="inventoryData[lens.id].branches && inventoryData[lens.id].branches.length > 0" class="space-y-1">
+              <div
+                v-for="branch in inventoryData[lens.id].branches"
+                :key="branch.branchCode"
+                class="text-sm"
+                :class="branch.availableQuantity > 0 ? 'text-green-600' : 'text-red-600'"
+              >
+                {{ branch.branchCode }}: {{ branch.availableQuantity }} available
+              </div>
+            </div>
+            <div v-else class="text-sm text-red-600">No stock available</div>
+          </div>
+          <!-- Branch Selection and Add to Cart -->
+          <div class="flex gap-2 items-end">
+            <v-select
+              v-model="selectedBranch[lens.id]"
+              :items="getAvailableBranches(lens.id)"
+              item-title="branchCode"
+              item-value="branchCode"
+              label="Select branch"
+              density="compact"
+              class="w-40"
+            />
+            <v-btn
+              size="small"
+              @click="addToCart(lens)"
+              :disabled="!selectedBranch[lens.id]"
+            >
+              add
+            </v-btn>
+          </div>
         </div>
-        <v-btn size="small" @click="addToCart(lens)">add</v-btn>
       </v-list-item>
       <v-list-item v-if="isLoading">Loading...</v-list-item>
       <v-list-item v-if="error">Error fetching lenses</v-list-item>
@@ -22,15 +59,21 @@
 
     <div v-if="cart.item">
       <h2 class="text-2xl mb-4">Cart</h2>
-      <div>
-        {{ cart.item.lensName }} — {{ cart.totalDays }} days — Rp{{ cart.totalPrice }}
+      <div class="mb-4">
+        <div>{{ cart.item.lensName }} — {{ cart.totalDays }} days — Rp{{ cart.totalPrice }}</div>
+        <div class="text-sm text-gray-600 mt-1">Branch: <strong>{{ cart.item.branchCode }}</strong></div>
       </div>
       <v-btn text color="error" @click="cart.clearCart()">clear</v-btn>
 
       <v-form @submit.prevent="onSubmit" class="mt-4" ref="formRef" v-model="formValid">
         <v-text-field v-model="name" label="Name" required :rules="[v => !!v || 'Name is required']" />
         <v-text-field v-model="email" label="Email" type="email" required :rules="[v => !!v || 'Email is required', v => /.+@.+\..+/.test(v) || 'Invalid email']" />
-        <v-btn :disabled="create.isLoading || !formValid" type="submit">Submit Order</v-btn>
+        <v-btn
+          :disabled="create.isLoading || !formValid || !hasStock"
+          type="submit"
+        >
+          {{ !hasStock ? 'Out of Stock' : 'Submit Order' }}
+        </v-btn>
       </v-form>
 
       <div v-if="result.type === 'error'" class="text-red-600 mt-2">
@@ -47,8 +90,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { useLenses } from '@/composables/useLenses';
+import { fetchInventory, type LensInventory } from '@/composables/useInventory';
 import { useCreateOrder } from '@/composables/useOrders';
 import { useCartStore } from '@/stores/cart';
 
@@ -62,16 +106,64 @@ const formRef = ref();
 const formValid = ref(false);
 const result = ref<{ type: 'success' | 'error' | null; message: string | null }>({ type: null, message: null });
 
+// Track selected branch per lens
+const selectedBranch = reactive<Record<string, string>>({});
+
+// Cache inventory data for each lens
+const inventoryData = reactive<Record<string, LensInventory>>({});
+
+// Fetch inventory when a lens is added to view
+function watchLensInventory(lensId: string) {
+  // perform a one-time fetch and populate cache; safe to call from watcher
+  fetchInventory(lensId)
+    .then((inv) => {
+      inventoryData[lensId] = inv;
+    })
+    .catch((err) => {
+      console.error('Failed to fetch inventory for', lensId, err);
+    });
+}
+
+// Initialize inventory watching for all lenses
+watch(
+  () => lenses.value,
+  (newLenses) => {
+    if (newLenses) {
+      newLenses.forEach((lens) => {
+        if (!inventoryData[lens.id]) {
+          watchLensInventory(lens.id);
+        }
+      });
+    }
+  }
+);
+
+function getAvailableBranches(lensId: string) {
+  const inv = inventoryData[lensId];
+  if (!inv || !inv.branches) return [];
+  return inv.branches.filter((b) => b.availableQuantity > 0);
+}
+
 function addToCart(lens: any) {
+  const branchCode = selectedBranch[lens.id];
+  if (!branchCode) {
+    result.value = { type: 'error', message: 'Please select a branch' };
+    setTimeout(() => {
+      result.value = { type: null, message: null };
+    }, 4000);
+    return;
+  }
+
   const start = new Date();
   const end = new Date();
-  end.setDate(end.getDate() + 3);  // default 3-day rental
+  end.setDate(end.getDate() + 3); // default 3-day rental
   cart.setItem({
     lensId: lens.id,
     lensName: lens.modelName,
     dayPrice: parseInt(lens.dayPrice, 10),
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
+    branchCode,
   });
   // reset form when adding new item to cart
   name.value = '';
@@ -79,8 +171,30 @@ function addToCart(lens: any) {
   result.value = { type: null, message: null };
 }
 
+// Check if selected branch has stock
+const hasStock = computed(() => {
+  if (!cart.item) return false;
+  const inv = inventoryData[cart.item.lensId];
+  if (!inv || !inv.branches) return false;
+  const branch = inv.branches.find((b) => b.branchCode === cart.item?.branchCode);
+  return branch ? branch.availableQuantity > 0 : false;
+});
+
 function onSubmit() {
   if (!cart.item) return;
+
+  // Check if selected branch still has stock
+  if (!hasStock.value) {
+    result.value = {
+      type: 'error',
+      message: `${cart.item.branchCode} is out of stock`,
+    };
+    setTimeout(() => {
+      result.value = { type: null, message: null };
+    }, 6000);
+    return;
+  }
+
   // clear previous result and submit
   result.value = { type: null, message: null };
   create.mutate(
@@ -88,6 +202,7 @@ function onSubmit() {
       customerName: name.value,
       customerEmail: email.value,
       lensId: cart.item.lensId,
+      branchCode: cart.item.branchCode,
       startDate: cart.item.startDate,
       endDate: cart.item.endDate,
     },

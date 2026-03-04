@@ -93,7 +93,7 @@ const app = new Elysia()
     }),
   })
 
-  .delete('/api/orders/:id', async ({ params }) => {
+  .patch('/api/orders/:id/cancel', async ({ params }) => {
     const existing = await db
       .select()
       .from(orders)
@@ -120,7 +120,7 @@ const app = new Elysia()
       quantity: 1,
     });
 
-    return new Response(JSON.stringify({ message: 'Order cancelled' }), { status: 200 });
+    return new Response(JSON.stringify(updated), { status: 200 });
   })
 
   .get('/api/orders', async () => db.select().from(orders))
