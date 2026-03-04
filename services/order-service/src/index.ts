@@ -5,11 +5,8 @@ import { orders } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { publishEvent } from './events';
 
-const CATALOG_SERVICE_URL =
-  process.env.CATALOG_SERVICE_URL || 'http://localhost:3001';
-
-const INVENTORY_SERVICE_URL =
-  process.env.INVENTORY_SERVICE_URL || 'http://localhost:3003';
+const CATALOG_SERVICE_URL = process.env.CATALOG_SERVICE_URL || 'http://localhost:3001';
+const INVENTORY_SERVICE_URL = process.env.INVENTORY_SERVICE_URL || 'http://localhost:3003';
 
 interface CatalogLens {
   id: string;
@@ -20,70 +17,48 @@ interface CatalogLens {
 
 const app = new Elysia()
   .use(cors())
-
   .post('/api/orders', async ({ body }) => {
-    const lensResponse = await fetch(
-      `${CATALOG_SERVICE_URL}/api/lenses/${body.lensId}`
-    );
+    const lensResponse = await fetch(`${CATALOG_SERVICE_URL}/api/lenses/${body.lensId}`);
 
     if (!lensResponse.ok) {
-      return new Response(JSON.stringify({ error: 'Lens not found' }), {
-        status: 404,
-      });
+      return new Response(JSON.stringify({ error: 'Lens not found' }), { status: 404 });
     }
 
     const lens = (await lensResponse.json()) as CatalogLens;
-
     const start = new Date(body.startDate);
     const end = new Date(body.endDate);
-
-    const days = Math.ceil(
-      (end.getTime() - start.getTime()) /
-        (1000 * 60 * 60 * 24)
-    );
+    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
     if (days <= 0) {
-      return new Response(
-        JSON.stringify({ error: 'End date must be after start date' }),
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ error: 'End date must be after start date' }), { status: 400 });
     }
 
-    const totalPrice = (
-      days * parseFloat(lens.dayPrice)
-    ).toFixed(2);
+    const totalPrice = (days * parseFloat(lens.dayPrice)).toFixed(2);
+    const newOrderId = crypto.randomUUID();
 
-    const reserveResponse = await fetch(
-      `${INVENTORY_SERVICE_URL}/api/inventory/reserve`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: crypto.randomUUID(),
-          lensId: body.lensId,
-          branchCode: body.branchCode,
-          quantity: 1,
-        }),
-      }
-    );
+    const reserveResponse = await fetch(`${INVENTORY_SERVICE_URL}/api/inventory/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: newOrderId,
+        lensId: body.lensId,
+        branchCode: body.branchCode,
+        quantity: 1,
+      }),
+    });
 
     if (reserveResponse.status === 409) {
-      return new Response(
-        JSON.stringify({ error: 'Selected branch has no available stock' }),
-        { status: 409 }
-      );
+      return new Response(JSON.stringify({ error: 'Selected branch has no available stock' }), { status: 409 });
     }
 
     if (!reserveResponse.ok) {
-      return new Response(
-        JSON.stringify({ error: 'Inventory service error' }),
-        { status: 500 }
-      );
+      return new Response(JSON.stringify({ error: 'Inventory service error' }), { status: 500 });
     }
 
     const [order] = await db
       .insert(orders)
       .values({
+        id: newOrderId,
         customerName: body.customerName,
         customerEmail: body.customerEmail,
         lensId: body.lensId,
@@ -99,26 +74,14 @@ const app = new Elysia()
       })
       .returning();
 
-    if (!order) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to create order' }),
-        { status: 500 }
-      );
-    }
-
     await publishEvent('order.placed', {
       orderId: order.id,
-      customerName: body.customerName,
-      customerEmail: body.customerEmail,
       lensId: body.lensId,
-      lensName: lens.modelName,
       branchCode: body.branchCode,
       quantity: 1,
     });
 
-    return new Response(JSON.stringify(order), {
-      status: 201,
-    });
+    return new Response(JSON.stringify(order), { status: 201 });
   }, {
     body: t.Object({
       customerName: t.String(),
@@ -130,9 +93,37 @@ const app = new Elysia()
     }),
   })
 
-  .get('/api/orders', async () =>
-    db.select().from(orders)
-  )
+  .delete('/api/orders/:id', async ({ params }) => {
+    const existing = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, params.id));
+
+    if (!existing[0]) {
+      return new Response(JSON.stringify({ error: 'Order not found' }), { status: 404 });
+    }
+
+    if (existing[0].status === 'cancelled') {
+      return new Response(JSON.stringify({ error: 'Order already cancelled' }), { status: 400 });
+    }
+
+    const [updated] = await db
+      .update(orders)
+      .set({ status: 'cancelled' })
+      .where(eq(orders.id, params.id))
+      .returning();
+
+    await publishEvent('order.cancelled', {
+      orderId: updated.id,
+      lensId: updated.lensId,
+      branchCode: updated.branchCode,
+      quantity: 1,
+    });
+
+    return new Response(JSON.stringify({ message: 'Order cancelled' }), { status: 200 });
+  })
+
+  .get('/api/orders', async () => db.select().from(orders))
 
   .get('/api/orders/:id', async ({ params }) => {
     const results = await db
@@ -141,10 +132,7 @@ const app = new Elysia()
       .where(eq(orders.id, params.id));
 
     if (!results[0]) {
-      return new Response(
-        JSON.stringify({ error: 'Order not found' }),
-        { status: 404 }
-      );
+      return new Response(JSON.stringify({ error: 'Order not found' }), { status: 404 });
     }
 
     return results[0];

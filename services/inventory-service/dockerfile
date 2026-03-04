@@ -1,7 +1,8 @@
 FROM oven/bun:1.3-alpine
 WORKDIR /app
 COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile
+RUN bun install
 COPY . .
+RUN chmod +x start.sh
 EXPOSE 3003
-CMD ["bun", "run", "src/index.ts"]
+CMD ["sh", "start.sh"]
